@@ -1,0 +1,109 @@
+version: '3.8'
+
+# ============================================================
+# Xuni 供应链智能调度平台 - 数据库服务 Docker Compose
+#
+# 用途：仅运行数据库、缓存、向量库等基础服务
+# 前后端在 IDE（PyCharm/IDEA）中直接运行
+# ============================================================
+
+services:
+  # ========== PostgreSQL 业务数据库 ==========
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: xuni-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: scheduling_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - xuni-network
+
+  # ========== Redis 缓存 ==========
+  redis:
+    image: redis:7.4-alpine
+    container_name: xuni-redis
+    restart: unless-stopped
+    command: >
+      redis-server --appendonly yes
+      ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - xuni-network
+
+  # ========== Qdrant 向量数据库（RAG知识库） ==========
+  qdrant:
+    image: qdrant/qdrant:v1.11.5
+    container_name: xuni-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_REST_PORT:-6333}:6333"      # REST API
+      - "${QDRANT_GRPC_PORT:-6334}:6334"      # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - xuni-network
+
+  # ========== Nacos 注册中心（可选，需 --profile full） ==========
+  nacos:
+    image: nacos/nacos-server:v2.4.0
+    container_name: xuni-nacos
+    restart: unless-stopped
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      SPRING_DATASOURCE_PLATFORM: embedded
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    volumes:
+      - nacos_data:/home/nacos/data
+    networks:
+      - xuni-network
+    profiles:
+      - full
+
+volumes:
+  postgres_data:
+    name: xuni_postgres_data
+  redis_data:
+    name: xuni_redis_data
+  qdrant_data:
+    name: xuni_qdrant_data
+  nacos_data:
+    name: xuni_nacos_data
+
+networks:
+  xuni-network:
+    name: xuni_network
+    driver: bridge

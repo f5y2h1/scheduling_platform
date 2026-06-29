@@ -1,0 +1,15 @@
+# 虚拟环境
+.venv/
+venv/
+
+# IDE配置
+.idea/
+
+# 其他可选忽略（前端/后端通用）
+__pycache__/
+*.pyc
+node_modules/
+dist/
+build/
+*.log
+

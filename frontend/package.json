@@ -1,0 +1,36 @@
+{
+  "name": "xuni-scheduling-platform",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "供应链智能调度平台 - 前端管理端",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .js,.jsx"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "antd": "^5.21.4",
+    "@ant-design/icons": "^5.5.1",
+    "@ant-design/pro-components": "^2.8.10",
+    "axios": "^1.7.7",
+    "zustand": "^5.0.0",
+    "recharts": "^2.13.0",
+    "dayjs": "^1.11.13",
+    "echarts": "^5.5.1",
+    "echarts-for-react": "^3.0.2",
+    "react-markdown": "^9.0.1",
+    "react-syntax-highlighter": "^15.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.2",
+    "vite": "^5.4.8",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react": "^7.37.1",
+    "eslint-plugin-react-hooks": "^4.6.2"
+  }
+}
