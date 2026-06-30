@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { Table, Button, Space, Tag, Alert, message, Input } from 'antd';
 import { PlusOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { inventoryAPI } from '@/services/api';
@@ -13,7 +14,7 @@ const statusMap = {
 };
 
 export default function InventoryManagement() {
-  const [keyword, setKeyword] = useState('');
+  const [keyword, setKeyword] = usePersistedState('inventory_keyword', '');
   const [alerts, setAlerts] = useState([]);
   const { data, loading, pagination, handleChange, refresh } = useTable(inventoryAPI.list, { page: 1, size: 20 });
   const { visible, form, show, hide, confirm } = useModal();

@@ -1,6 +1,6 @@
 """
 LangGraph 工作流定义与编译
-集成记忆系统、工具调用和 MCP 支持
+集成记忆系统、工具调用
 体现 LangGraph 核心特点：条件分支、循环迭代、工具调用
 """
 import uuid
@@ -24,7 +24,6 @@ from .nodes import (
     should_call_tool,
 )
 from .tools import get_all_tools
-from .mcp import mcp_integration, get_fallback_tools
 
 
 _checkpointer = None
@@ -57,9 +56,6 @@ def _get_tools():
         return _tools
     
     _tools = get_all_tools()
-    
-    fallback_tools = get_fallback_tools()
-    _tools.extend(fallback_tools)
     
     return _tools
 
@@ -131,14 +127,18 @@ def _get_workflow():
     return _scheduling_workflow
 
 
-async def run_workflow(query: str, model: str | None = None, 
-                       session_id: str | None = None) -> dict:
+async def run_workflow(query: str, model: str | None = None,
+                       session_id: str | None = None,
+                       user_id: int = None) -> dict:
+    import time
+    t0 = time.time()
+
     logger.info(f"[LangGraph] 启动调度工作流, query={query[:50]}..., model={model}, session_id={session_id}")
-    
+
     if not session_id:
         session_id = str(uuid.uuid4())
         logger.info(f"[LangGraph] 生成新会话ID: {session_id}")
-    
+
     initial_state: SchedulingState = {
         "query": query,
         "model": model or "qwen-plus",
@@ -148,14 +148,33 @@ async def run_workflow(query: str, model: str | None = None,
         "tool_calls": [],
         "iteration_count": 0,
     }
-    
+
     config = {"configurable": {"thread_id": session_id}}
-    
+
     workflow = _get_workflow()
     result = await workflow.ainvoke(initial_state, config)
-    
-    logger.info(f"[LangGraph] 调度工作流完成, session_id={session_id}, 迭代次数={result.get('iteration_count', 1)}")
-    
+
+    elapsed = round((time.time() - t0) * 1000)
+    iteration_count = result.get('iteration_count', 1)
+
+    logger.info(f"[LangGraph] 调度工作流完成, session_id={session_id}, "
+                f"迭代次数={iteration_count}, 耗时={elapsed}ms")
+
+    # 记录执行经验到长期记忆
+    try:
+        from app.services.memory.memory_manager import memory_manager
+        await memory_manager.record_execution(
+            session_id=session_id,
+            agent_name="scheduling_workflow",
+            query=query,
+            result=result.get("final_summary", ""),
+            duration_ms=elapsed,
+            iteration_count=iteration_count,
+            tool_calls_count=len(result.get("tool_calls", [])),
+        )
+    except Exception as e:
+        logger.warning(f"[LangGraph] 记录执行经验失败: {e}")
+
     return {
         "query": result["query"],
         "model": result["model"],
@@ -172,8 +191,9 @@ async def run_workflow(query: str, model: str | None = None,
         "summary": result.get("final_summary"),
         "execution_history": result.get("execution_history", []),
         "tool_calls": result.get("tool_calls", []),
-        "iteration_count": result.get("iteration_count", 1),
+        "iteration_count": iteration_count,
         "total_nodes": len(result.get("execution_history", [])),
+        "elapsed_ms": elapsed,
     }
 
 

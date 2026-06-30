@@ -3,6 +3,7 @@ import { Table, Button, Space, Tag, Modal, Form, Input, Select, InputNumber, Des
 import { PlusOutlined, EyeOutlined } from '@ant-design/icons';
 import { orderAPI } from '@/services/api';
 import { useTable, useModal } from '@/hooks';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { PageHeader, FormModal } from '@/components/common';
 
 const statusMap = {
@@ -15,7 +16,7 @@ const statusMap = {
 };
 
 export default function OrderManagement() {
-  const [keyword, setKeyword] = useState('');
+  const [keyword, setKeyword] = usePersistedState('order_keyword', '');
   const [statusFilter, setStatusFilter] = useState('');
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState(null);

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import {
   Row, Col, Card, Button, Input, Select, Tag, Space, Table,
   Modal, Form, Spin, Statistic, Tabs, List, Badge, message,
@@ -31,7 +32,7 @@ export default function KnowledgeManagement() {
   const [loading, setLoading] = useState(false);
 
   // 检索状态
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistedState('knowledge_search_query', '');
   const [searchResults, setSearchResults] = useState([]);
   const [searchMode, setSearchMode] = useState('hybrid');
   const [searchTopK, setSearchTopK] = useState(5);
@@ -44,7 +45,7 @@ export default function KnowledgeManagement() {
   const [saving, setSaving] = useState(false);
 
   // RAG问答状态
-  const [ragQuery, setRagQuery] = useState('');
+  const [ragQuery, setRagQuery] = usePersistedState('knowledge_rag_query', '');
   const [ragResult, setRagResult] = useState(null);
   const [ragLoading, setRagLoading] = useState(false);
   const [ragStrategy, setRagStrategy] = useState('hybrid');
@@ -256,7 +257,7 @@ export default function KnowledgeManagement() {
 
   return (
     <div style={{ padding: '0 4px' }}>
-      <Title level={2} style={{ marginBottom: 24, color: '#1e1b4b' }}>
+      <Title level={2} style={{ marginBottom: 24, color: '#e2e8f0' }}>
         <BookOutlined style={{ marginRight: 8 }} />
         RAG 知识库管理
       </Title>
@@ -269,7 +270,7 @@ export default function KnowledgeManagement() {
               title={<Text type="secondary">知识文档</Text>}
               value={stats?.knowledgeCount || 0}
               prefix={<BookOutlined style={{ color: '#6366f1' }} />}
-              valueStyle={{ color: '#1e1b4b' }}
+              valueStyle={{ color: '#e2e8f0' }}
             />
           </Card>
         </Col>
@@ -279,7 +280,7 @@ export default function KnowledgeManagement() {
               title={<Text type="secondary">决策记录</Text>}
               value={stats?.decisionCount || 0}
               prefix={<HistoryOutlined style={{ color: '#10b981' }} />}
-              valueStyle={{ color: '#1e1b4b' }}
+              valueStyle={{ color: '#e2e8f0' }}
             />
           </Card>
         </Col>
@@ -289,7 +290,7 @@ export default function KnowledgeManagement() {
               title={<Text type="secondary">业务规则</Text>}
               value={stats?.ruleCount || 0}
               prefix={<FileTextOutlined style={{ color: '#f59e0b' }} />}
-              valueStyle={{ color: '#1e1b4b' }}
+              valueStyle={{ color: '#e2e8f0' }}
             />
           </Card>
         </Col>
@@ -299,7 +300,7 @@ export default function KnowledgeManagement() {
               title={<Text type="secondary">向量总数</Text>}
               value={stats?.totalVectors || 0}
               prefix={<DatabaseOutlined style={{ color: '#ec4899' }} />}
-              valueStyle={{ color: '#1e1b4b' }}
+              valueStyle={{ color: '#e2e8f0' }}
             />
           </Card>
         </Col>
@@ -651,7 +652,7 @@ export default function KnowledgeManagement() {
                                 </Space>
                               }
                             />
-                            <div style={{ fontSize: 12, color: '#999' }}>
+                            <div style={{ fontSize: 12, color: '#64748b' }}>
                               {doc.created_at?.split('T')[0]}
                             </div>
                           </List.Item>
@@ -660,7 +661,7 @@ export default function KnowledgeManagement() {
                     ) : (
                       <div style={{ padding: '40px 0', textAlign: 'center' }}>
                         <DatabaseOutlined style={{ fontSize: 48, color: '#d9d9d9', marginBottom: 16 }} />
-                        <Paragraph style={{ color: '#999' }}>
+                        <Paragraph style={{ color: '#64748b' }}>
                           暂无文档，点击上方按钮录入或初始化知识库
                         </Paragraph>
                         <Button
@@ -722,7 +723,7 @@ export default function KnowledgeManagement() {
                             background: '#fafafa',
                             padding: 16,
                             borderRadius: 8,
-                            color: '#333',
+                            color: '#cbd5e1',
                           }}
                         >
                           {selectedDoc.full_content}
@@ -731,7 +732,7 @@ export default function KnowledgeManagement() {
                     ) : (
                       <div style={{ padding: '60px 0', textAlign: 'center' }}>
                         <BookOutlined style={{ fontSize: 48, color: '#d9d9d9', marginBottom: 16 }} />
-                        <Paragraph style={{ color: '#999' }}>
+                        <Paragraph style={{ color: '#64748b' }}>
                           请从左侧列表选择一个文档查看详情
                         </Paragraph>
                       </div>
@@ -752,7 +753,7 @@ export default function KnowledgeManagement() {
         onOk={handleAddDoc}
         confirmLoading={saving}
         width={720}
-        destroyOnClose
+        destroyOnHidden
       >
         <Alert
           type="info"

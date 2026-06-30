@@ -1,16 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
+import { Button, Input, Avatar, Tooltip, message, Spin, Image, Modal } from 'antd';
 import {
-  Button, Input, Avatar, Tooltip, message,
-  Spin, Image, Modal, Dropdown, Menu,
-} from 'antd';
-import {
-  SendOutlined, AudioOutlined, StopOutlined,
+  SendOutlined, AudioOutlined, PauseCircleOutlined,
   PictureOutlined, PaperClipOutlined,
   UserOutlined, RobotOutlined,
-  ClearOutlined, HistoryOutlined, DeleteOutlined,
-  ClockCircleOutlined,
+  ClearOutlined, ClockCircleOutlined, SettingOutlined,
 } from '@ant-design/icons';
 import { aiAPI } from '@/services/api';
+import { usePersistedState } from '@/hooks/usePersistedState';
 
 const { TextArea } = Input;
 
@@ -103,7 +100,7 @@ function deleteHistoryRecord(sessionId) {
 
 export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
   const [messages, setMessages] = useState([]);
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = usePersistedState('chat_input_value', '');
   const [isRecording, setIsRecording] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [showImagePreview, setShowImagePreview] = useState(false);
@@ -111,8 +108,6 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
   const [imageBase64, setImageBase64] = useState('');
   const [uploading, setUploading] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState('');
-  const [historyRecords, setHistoryRecords] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
   
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -120,37 +115,24 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
   const fileInputRef = useRef(null);
   
   useEffect(() => {
-    setHistoryRecords(loadHistoryRecords());
-  }, []);
-  
-  useEffect(() => {
     const savedSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
     const initialSessionId = sessionId || savedSessionId || `chat_${Date.now()}`;
-    
-    if (!sessionId) {
-      setSessionId(initialSessionId);
-    }
-    
+    if (!sessionId) setSessionId(initialSessionId);
     const savedMessages = loadMessagesFromStorage(initialSessionId);
-    if (savedMessages.length > 0) {
-      setMessages(savedMessages);
-    }
-  }, [sessionId, setSessionId]);
-  
+    if (savedMessages.length > 0) setMessages(savedMessages);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (sessionId) {
       saveMessagesToStorage(sessionId, messages);
       localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
     }
   }, [sessionId, messages]);
-  
+
   useEffect(() => {
-    if (messages.length > 0 && sessionId) {
-      saveHistoryRecord(sessionId, messages);
-      setHistoryRecords(loadHistoryRecords());
-    }
+    if (messages.length > 0 && sessionId) saveHistoryRecord(sessionId, messages);
   }, [messages, sessionId]);
-  
+
   const scrollToBottom = useCallback(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -268,78 +250,46 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
     const assistantMessageId = Date.now() + 1;
 
     try {
-      const response = await fetch('/api/ai/chat/stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
-        },
-        body: JSON.stringify({
-          session_id: newSessionId,
-          message: userMessage.content,
-          image: imageBase64,
-        }),
+      const result = await aiAPI.chat({
+        session_id: newSessionId,
+        message: userMessage.content,
+        image: imageBase64,
+        smart: true,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`请求失败: ${response.status} ${errorText}`);
+      const { content, toolCalls } = result;
+
+      const newMessages = [];
+
+      if (toolCalls && toolCalls.length > 0) {
+        for (let i = 0; i < toolCalls.length; i++) {
+          const tc = toolCalls[i];
+          newMessages.push({
+            id: assistantMessageId + i * 10,
+            role: 'tool',
+            toolName: tc.tool,
+            arguments: tc.arguments,
+            result: tc.result,
+            timestamp: new Date().toLocaleTimeString(),
+            date: new Date().toLocaleDateString('zh-CN'),
+          });
+        }
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = '';
-
-      setMessages(prev => [...prev, {
+      newMessages.push({
         id: assistantMessageId,
         role: 'assistant',
-        content: '',
+        content: content || '抱歉，我暂时无法回答这个问题。',
         timestamp: new Date().toLocaleTimeString(),
         date: new Date().toLocaleDateString('zh-CN'),
-      }]);
+      });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      setMessages(prev => [...prev, ...newMessages]);
+      setIsTyping(false);
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n\n');
-
-        let shouldBreak = false;
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-
-            if (data.includes('[END]')) {
-              setIsTyping(false);
-              shouldBreak = true;
-              break;
-            }
-
-            if (data.includes('[ERROR]')) {
-              const error = data.replace('[ERROR]', '').replace('[/ERROR]', '');
-              message.error(`聊天出错: ${error}`);
-              setIsTyping(false);
-              shouldBreak = true;
-              break;
-            }
-
-            assistantContent += data;
-
-            setMessages(prev => prev.map(msg =>
-              msg.id === assistantMessageId
-                ? { ...msg, content: assistantContent }
-                : msg
-            ));
-          }
-        }
-
-        if (shouldBreak) break;
-      }
-
-      if (assistantContent.includes('调度') ||
-          assistantContent.includes('需求预测') ||
-          assistantContent.includes('库存优化')) {
+      if (content.includes('调度') ||
+          content.includes('需求预测') ||
+          content.includes('库存优化')) {
         setTimeout(() => {
           message.info('检测到调度需求，可点击下方按钮触发工作流');
         }, 1000);
@@ -454,35 +404,12 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
       onOk: () => {
         if (sessionId) {
           saveHistoryRecord(sessionId, messages);
-          setHistoryRecords(loadHistoryRecords());
+          // (history saved to localStorage for sidebar panel)
         }
         setMessages([]);
         const newSessionId = `chat_${Date.now()}`;
         setSessionId(newSessionId);
         message.success('对话已清空并保存到历史记录');
-      },
-    });
-  };
-  
-  const handleLoadHistory = (record) => {
-    setSessionId(record.sessionId);
-    setMessages(loadMessagesFromStorage(record.sessionId));
-    setShowHistory(false);
-    message.success('已加载历史对话');
-  };
-  
-  const handleDeleteHistory = (record) => {
-    Modal.confirm({
-      title: '删除历史记录',
-      content: `确定要删除「${record.title}」这条历史记录吗？`,
-      onOk: () => {
-        const updatedRecords = deleteHistoryRecord(record.sessionId);
-        setHistoryRecords(updatedRecords);
-        if (sessionId === record.sessionId) {
-          setMessages([]);
-          setSessionId(`chat_${Date.now()}`);
-        }
-        message.success('历史记录已删除');
       },
     });
   };
@@ -538,82 +465,36 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
     }}>
       {/* 头部工具栏 */}
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 16px',
-        background: '#fff',
-        borderBottom: '1px solid #e2e8f0',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            <RobotOutlined style={{ fontSize: 18, color: '#fff' }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#1e1b4b' }}>供应链智能助手</div>
-            <div style={{ fontSize: 11, color: '#999' }}>
-              {sessionId ? `会话: ${sessionId.slice(0, 8)}...` : '新会话'}
-            </div>
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '16px 24px',
+      background: '#fff',
+      borderBottom: '1px solid #e2e8f0',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{
+          width: 56,
+          height: 56,
+          borderRadius: 16,
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 8px 24px rgba(102, 126, 234, 0.35)',
+        }}>
+          <RobotOutlined style={{ fontSize: 28, color: '#fff' }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}>供应链智能助手</div>
+          <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
+            {sessionId ? `会话: ${sessionId.slice(0, 8)}...` : '新会话'}
           </div>
         </div>
+      </div>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Dropdown
-            overlay={
-              <Menu
-                items={historyRecords.map(record => ({
-                  key: record.sessionId,
-                  label: (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: 280 }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{record.title}</div>
-                        <div style={{ fontSize: 11, color: '#999' }}>
-                          {record.date} {record.time} · {record.messageCount} 条消息
-                        </div>
-                      </div>
-                      <Button
-                        type="text"
-                        danger
-                        size="small"
-                        icon={<DeleteOutlined />}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteHistory(record);
-                        }}
-                      />
-                    </div>
-                  ),
-                  onClick: () => handleLoadHistory(record),
-                }))}
-              />
-            }
-            trigger="click"
-            open={showHistory}
-            onOpenChange={setShowHistory}
-          >
-            <Button
-              icon={<HistoryOutlined />}
-              size="small"
-              style={{ borderRadius: 8 }}
-            >
-              历史记录
-              {historyRecords.length > 0 && (
-                <span style={{ marginLeft: 4, fontSize: 11, background: '#e0e7ff', padding: '0 6px', borderRadius: 10 }}>
-                  {historyRecords.length}
-                </span>
-              )}
-            </Button>
-          </Dropdown>
-          
-          {messages.length > 0 && (
+        {messages.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Tooltip title="清空当前对话">
               <Button
                 icon={<ClearOutlined />}
@@ -625,8 +506,8 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
                 清空
               </Button>
             </Tooltip>
-          )}
-        </div>
+          </div>
+        )}
       </div>
       
       {/* 聊天区域 */}
@@ -639,7 +520,7 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
           display: 'flex',
           flexDirection: 'column',
           gap: 16,
-          maxHeight: 'calc(100vh - 480px)',
+          minHeight: 0,
         }}
         className="chat-messages-container"
       >
@@ -650,7 +531,7 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#999',
+            color: '#64748b',
           }}>
             <div style={{
               width: 80,
@@ -669,10 +550,10 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
               您好！我可以帮您解答供应链管理相关问题，或为您制定智能调度方案。
             </p>
             <div style={{ marginTop: 20, display: 'flex', gap: 8 }}>
-              <Button size="small" ghost onClick={() => setInputValue('什么是供应链调度？')}>
+              <Button size="small" ghost style={{ color: '#e2e8f0' }} onClick={() => setInputValue('什么是供应链调度？')}>
                 什么是供应链调度？
               </Button>
-              <Button size="small" ghost onClick={() => setInputValue('帮我制定库存优化方案')}>
+              <Button size="small" ghost style={{ color: '#e2e8f0' }} onClick={() => setInputValue('帮我制定库存优化方案')}>
                 帮我制定库存优化方案
               </Button>
             </div>
@@ -681,71 +562,129 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
           messages.map((msg, index) => (
             <React.Fragment key={msg.id}>
               {renderDateDivider(msg.date, index, messages)}
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                  gap: 12,
-                  alignItems: 'flex-start',
-                }}
-              >
-                <Avatar
-                  icon={msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
+              {msg.role === 'tool' ? (
+                <div
                   style={{
-                    background: msg.role === 'user' 
-                      ? 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)'
-                      : '#14b8a6',
-                    width: 40,
-                    height: 40,
-                    flexShrink: 0,
-                    border: '2px solid #fff',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                    padding: '8px 0',
+                    display: 'flex',
+                    justifyContent: 'center',
                   }}
-                />
-                <div style={{ maxWidth: '75%', minWidth: 0 }}>
+                >
                   <div
                     style={{
-                      padding: '14px 18px',
-                      borderRadius: msg.role === 'user' 
-                        ? '18px 18px 6px 18px'
-                        : '18px 18px 18px 6px',
-                      background: msg.role === 'user'
-                        ? 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)'
-                        : '#fff',
-                      color: msg.role === 'user' ? '#fff' : '#1e293b',
-                      boxShadow: msg.role === 'user'
-                        ? '0 4px 12px rgba(99, 102, 241, 0.3)'
-                        : '0 2px 8px rgba(0, 0, 0, 0.06)',
-                      fontSize: 14,
-                      lineHeight: 1.65,
+                      width: '75%',
+                      padding: '12px 16px',
+                      borderRadius: 12,
+                      background: '#f0fdf4',
+                      border: '1px solid #bbf7d0',
+                      fontSize: 13,
                     }}
                   >
-                    {msg.image ? (
-                      <Image
-                        src={msg.image}
-                        style={{ maxWidth: '100%', borderRadius: 8 }}
-                        onClick={() => {
-                          setPreviewImage(msg.image);
-                          setShowImagePreview(true);
-                        }}
-                      />
-                    ) : (
-                      formatMessage(msg.content)
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <SettingOutlined style={{ color: '#10b981', fontSize: 16 }} />
+                      <span style={{ fontWeight: 600, color: '#059669' }}>调用工具: {msg.toolName}</span>
+                    </div>
+                    {msg.arguments && Object.keys(msg.arguments).length > 0 && (
+                      <div style={{ marginBottom: 8, paddingLeft: 24 }}>
+                        <span style={{ color: '#64748b', fontSize: 12 }}>参数:</span>
+                        <pre style={{ 
+                          margin: '4px 0 0 0', 
+                          padding: '8px', 
+                          background: '#f8fafc', 
+                          borderRadius: 6,
+                          fontSize: 12,
+                          overflowX: 'auto',
+                          color: '#374151'
+                        }}>
+                          {JSON.stringify(msg.arguments, null, 2)}
+                        </pre>
+                      </div>
                     )}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: '#999',
-                      marginTop: 4,
-                      textAlign: msg.role === 'user' ? 'right' : 'left',
-                      padding: '0 4px',
-                    }}
-                  >
-                    {msg.timestamp}
+                    <div style={{ paddingLeft: 24 }}>
+                      <span style={{ color: '#64748b', fontSize: 12 }}>结果:</span>
+                      <pre style={{ 
+                        margin: '4px 0 0 0', 
+                        padding: '8px', 
+                        background: '#f8fafc', 
+                        borderRadius: 6,
+                        fontSize: 12,
+                        overflowX: 'auto',
+                        maxHeight: 200,
+                        overflowY: 'auto',
+                        color: '#374151'
+                      }}>
+                        {JSON.stringify(msg.result, null, 2)}
+                      </pre>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+                    gap: 12,
+                    alignItems: 'flex-start',
+                  }}
+                >
+                  <Avatar
+                    icon={msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
+                    style={{
+                      background: msg.role === 'user' 
+                        ? 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)'
+                        : '#14b8a6',
+                      width: 40,
+                      height: 40,
+                      flexShrink: 0,
+                      border: '2px solid #fff',
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                    }}
+                  />
+                  <div style={{ maxWidth: '75%', minWidth: 0 }}>
+                    <div
+                      style={{
+                        padding: '14px 18px',
+                        borderRadius: msg.role === 'user' 
+                          ? '18px 18px 6px 18px'
+                          : '18px 18px 18px 6px',
+                        background: msg.role === 'user'
+                          ? 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)'
+                          : '#fff',
+                        color: msg.role === 'user' ? '#fff' : '#1e293b',
+                        boxShadow: msg.role === 'user'
+                          ? '0 4px 12px rgba(99, 102, 241, 0.3)'
+                          : '0 2px 8px rgba(0, 0, 0, 0.06)',
+                        fontSize: 14,
+                        lineHeight: 1.65,
+                      }}
+                    >
+                      {msg.image ? (
+                        <Image
+                          src={msg.image}
+                          style={{ maxWidth: '100%', borderRadius: 8 }}
+                          onClick={() => {
+                            setPreviewImage(msg.image);
+                            setShowImagePreview(true);
+                          }}
+                        />
+                      ) : (
+                        formatMessage(msg.content)
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: '#64748b',
+                        marginTop: 4,
+                        textAlign: msg.role === 'user' ? 'right' : 'left',
+                        padding: '0 4px',
+                      }}
+                    >
+                      {msg.timestamp}
+                    </div>
+                  </div>
+                </div>
+              )}
             </React.Fragment>
           ))
         )}
@@ -765,7 +704,7 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
               }}
             >
               <Spin size="small" />
-              <span style={{ marginLeft: 8, color: '#999', fontSize: 14 }}>正在思考...</span>
+              <span style={{ marginLeft: 8, color: '#64748b', fontSize: 14 }}>正在思考...</span>
             </div>
           </div>
         )}
@@ -797,7 +736,7 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
               height={60}
               style={{ borderRadius: 8, objectFit: 'cover' }}
             />
-            <span style={{ fontSize: 13, color: '#666' }}>已添加图片</span>
+            <span style={{ fontSize: 13, color: '#94a3b8' }}>已添加图片</span>
             <Button
               type="text"
               danger
@@ -812,12 +751,14 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
             <TextArea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress}
               placeholder="输入消息，按 Enter 发送，Shift+Enter 换行..."
               rows={2}
               style={{
                 borderRadius: 12,
-                resize: 'none',
+                resize: 'vertical',
+                minHeight: 80,
+                maxHeight: 200,
                 fontSize: 14,
               }}
             />
@@ -835,7 +776,7 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
               </Tooltip>
               <Tooltip title={isRecording ? '停止录音' : '语音输入'}>
                 <Button
-                  icon={isRecording ? <StopOutlined /> : <AudioOutlined />}
+                  icon={isRecording ? <PauseCircleOutlined /> : <AudioOutlined />}
                   onClick={toggleRecording}
                   type={isRecording ? 'primary' : 'default'}
                   danger={isRecording}
@@ -872,7 +813,7 @@ export default function ChatUI({ onWorkflowRequest, sessionId, setSessionId }) {
             paddingTop: 12,
             borderTop: '1px dashed #eee',
           }}>
-            <span style={{ fontSize: 12, color: '#999' }}>
+            <span style={{ fontSize: 12, color: '#64748b' }}>
               💡 如果需要制定完整的调度方案，请点击下方按钮
             </span>
             <Button

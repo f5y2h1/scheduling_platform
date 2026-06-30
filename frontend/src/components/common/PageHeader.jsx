@@ -7,7 +7,7 @@ export default function PageHeader({ title, breadcrumb = [], extra }) {
     <div style={{ marginBottom: 24 }}>
       <Breadcrumb items={breadcrumb} style={{ marginBottom: 16 }} />
       <Space justify="space-between" style={{ width: '100%' }}>
-        <Title level={3} style={{ margin: 0, color: '#1a2b3c' }}>
+        <Title level={3} style={{ margin: 0, color: '#e2e8f0' }}>
           {title}
         </Title>
         {extra}

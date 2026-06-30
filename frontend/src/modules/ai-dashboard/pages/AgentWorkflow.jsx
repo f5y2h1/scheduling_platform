@@ -12,7 +12,9 @@ import {
   CheckCircleOutlined, LoadingOutlined, RobotOutlined,
   DatabaseOutlined, ClockCircleOutlined, FireOutlined,
   SyncOutlined, RetweetOutlined, WarningOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
+import { motion } from 'framer-motion';
 import { aiAPI } from '@/services/api';
 import ChatUI from '@/components/chat/ChatUI';
 
@@ -49,10 +51,58 @@ export default function AgentWorkflow() {
     try {
       const [t, s] = await Promise.all([
         aiAPI.getTools().catch(() => []),
-        aiAPI.getSessions().catch(() => []),
+        aiAPI.getSessions().catch(() => ({ chat_sessions: [], workflow_sessions: [] })),
       ]);
-      setTools(t || []);
-      setSessions(s || []);
+      setTools(Array.isArray(t) ? t : []);
+
+      const chatSessions = Array.isArray(s?.chat_sessions) ? s.chat_sessions : [];
+      const workflowSessions = Array.isArray(s?.workflow_sessions) ? s.workflow_sessions : [];
+
+      // 从 localStorage 加载聊天历史记录
+      let localRecords = [];
+      try {
+        localRecords = JSON.parse(localStorage.getItem('xuni_chat_history_records') || '[]');
+      } catch (_) { /* ignore */ }
+
+      const localHistorySessions = localRecords.map(r => ({
+        thread_id: r.sessionId,
+        type: 'local_chat',
+        title: r.title || '聊天记录',
+        message_count: r.messageCount || 0,
+        created_at: r.date,
+        updated_at: new Date(r.lastUpdate).toISOString(),
+        _source: 'local',
+      }));
+
+      const merged = Array.isArray(s) ? s : [
+        ...localHistorySessions,
+        ...chatSessions.map(cs => ({
+          thread_id: cs.session_id,
+          type: 'chat',
+          title: cs.title || '聊天会话',
+          message_count: cs.message_count || 0,
+          created_at: cs.created_at,
+          updated_at: cs.updated_at,
+          _source: 'server',
+        })),
+        ...workflowSessions.map(ws => ({
+          thread_id: ws.thread_id,
+          type: 'workflow',
+          title: '调度工作流',
+          created_at: ws.created_at,
+          _source: 'server',
+        })),
+      ];
+
+      // 按 thread_id 去重
+      const seen = new Set();
+      const deduped = merged.filter(item => {
+        if (seen.has(item.thread_id)) return false;
+        seen.add(item.thread_id);
+        return true;
+      });
+
+      setSessions(deduped);
     } catch (e) {
       console.error('加载数据失败:', e);
       message.error('加载数据失败');
@@ -101,11 +151,29 @@ export default function AgentWorkflow() {
   };
 
   const handleContinueSession = (sid) => {
+    // 如果是本地聊天记录，加载到聊天窗口
+    const record = sessions.find(s => s.thread_id === sid);
+    if (record?._source === 'local') {
+      setSessionId(sid);
+      message.success('已切换到该会话');
+      return;
+    }
     setSessionId(sid);
     message.info('已切换到指定会话');
   };
 
   const handleViewHistory = async (sid) => {
+    const record = sessions.find(s => s.thread_id === sid);
+    if (record?._source === 'local') {
+      // 从 localStorage 加载本地聊天消息
+      try {
+        const chatData = JSON.parse(localStorage.getItem('xuni_chat_history') || '{}');
+        const msgs = chatData[sid] || [];
+        setSessionHistory({ session_id: sid, title: record.title, messages: msgs, count: msgs.length });
+        setSelectedSession(sid);
+      } catch (_) { message.error('加载失败'); }
+      return;
+    }
     setSelectedSession(sid);
     setHistoryLoading(true);
     try {
@@ -118,12 +186,23 @@ export default function AgentWorkflow() {
   };
 
   const handleDeleteSession = async (sid) => {
+    const record = sessions.find(s => s.thread_id === sid);
     Modal.confirm({
       title: '确认删除',
-      content: '确定要删除该会话记录吗？',
+      content: `确定要删除「${record?.title || sid}」这条会话记录吗？`,
       onOk: async () => {
         try {
-          await aiAPI.deleteSession(sid);
+          if (record?._source === 'local') {
+            // 删除 localStorage 中的聊天记录
+            const records = JSON.parse(localStorage.getItem('xuni_chat_history_records') || '[]');
+            localStorage.setItem('xuni_chat_history_records', JSON.stringify(records.filter(r => r.sessionId !== sid)));
+            const chatData = JSON.parse(localStorage.getItem('xuni_chat_history') || '{}');
+            delete chatData[sid];
+            localStorage.setItem('xuni_chat_history', JSON.stringify(chatData));
+            if (sessionId === sid) setSessionId(`chat_${Date.now()}`);
+          } else {
+            await aiAPI.deleteSession(sid);
+          }
           message.success('删除成功');
           loadInitialData();
         } catch (e) {
@@ -135,17 +214,32 @@ export default function AgentWorkflow() {
 
   const sessionColumns = [
     {
-      title: '会话',
+      title: '类型',
+      dataIndex: 'type',
+      key: 'type',
+      width: 72,
+      render: (type) => {
+        if (type === 'workflow') return <Tag icon={<SyncOutlined spin />} color="blue">工作流</Tag>;
+        if (type === 'local_chat') return <Tag icon={<HistoryOutlined />} color="green">本地</Tag>;
+        return <Tag icon={<HistoryOutlined />} color="purple">聊天</Tag>;
+      },
+    },
+    {
+      title: '会话ID / 标题',
       dataIndex: 'thread_id',
       key: 'thread_id',
-      render: (id) => (
-        <Tag icon={<HistoryOutlined />} color="purple">{id?.slice(0, 12)}...</Tag>
+      render: (id, record) => (
+        <div>
+          <div><Tag icon={<HistoryOutlined />} color="purple">{id?.slice(0, 16)}...</Tag></div>
+          {record.title && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{record.title}</div>}
+        </div>
       ),
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
+      width: 150,
       render: (t) => t ? new Date(t).toLocaleString() : '-',
     },
     {
@@ -177,45 +271,50 @@ export default function AgentWorkflow() {
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: 24 }}>
-        <Row align="middle" gutter={16}>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: 'calc(100vh - 144px)',
+      overflow: 'hidden',
+    }}>
+      <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #e2e8f0' }}>
+        <Row align="middle" gutter={12}>
           <Col>
             <div style={{
-              width: 56,
-              height: 56,
-              borderRadius: 16,
+              width: 40,
+              height: 40,
+              borderRadius: 12,
               background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 28,
-              boxShadow: '0 8px 24px rgba(102, 126, 234, 0.35)',
+              fontSize: 20,
+              boxShadow: '0 4px 12px rgba(102, 126, 234, 0.25)',
             }}>
               <RobotOutlined style={{ color: '#fff' }} />
             </div>
           </Col>
           <Col flex="auto">
-            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#1e1b4b' }}>
+            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}>
               Agent 工作流编排
             </h1>
-            <p style={{ margin: 4, color: '#666', fontSize: 14 }}>
+            <p style={{ margin: 2, color: '#94a3b8', fontSize: 12 }}>
               基于 LangGraph 的多 Agent 协作调度系统 · 支持聊天对话、语音输入、图片上传
             </p>
           </Col>
           <Col>
-            <Space>
-              <Tag icon={<RobotOutlined />} color="purple">LangGraph</Tag>
-              <Tag icon={<DatabaseOutlined />} color="blue">记忆系统</Tag>
-              <Tag icon={<ToolOutlined />} color="green">工具调用</Tag>
-              <Tag icon={<SyncOutlined />} color="orange">流式对话</Tag>
+            <Space size={8}>
+              <Tag icon={<RobotOutlined />} color="purple" style={{ fontSize: 11 }}>LangGraph</Tag>
+              <Tag icon={<DatabaseOutlined />} color="blue" style={{ fontSize: 11 }}>记忆系统</Tag>
+              <Tag icon={<ToolOutlined />} color="green" style={{ fontSize: 11 }}>工具调用</Tag>
+              <Tag icon={<SyncOutlined />} color="orange" style={{ fontSize: 11 }}>流式对话</Tag>
             </Space>
           </Col>
         </Row>
       </div>
 
-      <Row gutter={[24, 24]}>
-        <Col xs={24} lg={16}>
+      <Row gutter={[16, 16]} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <Col xs={24} lg={16} style={{ height: '100%' }}>
           {showWorkflowResult ? (
             <>
               <Card
@@ -223,6 +322,8 @@ export default function AgentWorkflow() {
                   borderRadius: 16,
                   boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
                   border: 'none',
+                  height: '100%',
+                  overflow: 'auto',
                 }}
                 extra={
                   <Button
@@ -283,7 +384,7 @@ export default function AgentWorkflow() {
                         stroke={{ gradient: 'linear-gradient(90deg, #667eea, #764ba2)' }}
                         style={{ marginTop: 24 }}
                       />
-                      <p style={{ color: '#666', marginTop: 8 }}>
+                      <p style={{ color: '#94a3b8', marginTop: 8 }}>
                         正在执行 {currentStep > 0 ? stepConfig[currentStep - 1]?.label : '准备中'}...
                       </p>
                     </Card>
@@ -298,7 +399,7 @@ export default function AgentWorkflow() {
                           <div style={{ fontSize: 28, fontWeight: 700, color: '#3b82f6' }}>
                             {result.iteration_count || 1}
                           </div>
-                          <div style={{ fontSize: 12, color: '#666' }}>迭代次数</div>
+                          <div style={{ fontSize: 12, color: '#94a3b8' }}>迭代次数</div>
                         </Card>
                       </Col>
                       <Col span={8}>
@@ -306,7 +407,7 @@ export default function AgentWorkflow() {
                           <div style={{ fontSize: 28, fontWeight: 700, color: result.iteration_count > 1 ? '#f59e0b' : '#10b981' }}>
                             {result.iteration_count > 1 ? <SyncOutlined spin /> : <CheckCircleOutlined />}
                           </div>
-                          <div style={{ fontSize: 12, color: '#666' }}>
+                          <div style={{ fontSize: 12, color: '#94a3b8' }}>
                             {result.iteration_count > 1 ? '触发循环优化' : '单次执行'}
                           </div>
                         </Card>
@@ -316,7 +417,7 @@ export default function AgentWorkflow() {
                           <div style={{ fontSize: 28, fontWeight: 700, color: '#8b5cf6' }}>
                             {result.total_nodes || 7}
                           </div>
-                          <div style={{ fontSize: 12, color: '#666' }}>执行节点数</div>
+                          <div style={{ fontSize: 12, color: '#94a3b8' }}>执行节点数</div>
                         </Card>
                       </Col>
                     </Row>
@@ -421,7 +522,7 @@ export default function AgentWorkflow() {
                                 <span style={{ color: step.color, opacity: 0.8 }}>{step.icon}</span>
                                 <span style={{ fontWeight: 600, opacity: 0.8 }}>{step.label}</span>
                                 {step.desc && (
-                                  <span style={{ color: '#999', fontSize: 12, opacity: 0.6 }}>{step.desc}</span>
+                                  <span style={{ color: '#64748b', fontSize: 12, opacity: 0.6 }}>{step.desc}</span>
                                 )}
                                 {result.steps?.[step.key] && (
                                   <CheckCircleOutlined style={{ color: '#10b981', opacity: 0.8 }} />
@@ -439,7 +540,7 @@ export default function AgentWorkflow() {
                                 maxHeight: 150,
                                 overflow: 'auto',
                                 border: '1px solid #f0f0f0',
-                                color: '#666',
+                                color: '#94a3b8',
                                 opacity: 0.85,
                               }}>
                                 {typeof result.steps[step.key] === 'object' 
@@ -447,7 +548,7 @@ export default function AgentWorkflow() {
                                   : result.steps[step.key]}
                               </pre>
                             ) : (
-                              <span style={{ color: '#999', opacity: 0.6 }}>暂无数据</span>
+                              <span style={{ color: '#64748b', opacity: 0.6 }}>暂无数据</span>
                             ),
                           }))}
                         />
@@ -456,22 +557,53 @@ export default function AgentWorkflow() {
 
                     {result.summary && (
                       <>
-                        <Divider><span style={{ color: '#666' }}>📋 最终方案总结</span></Divider>
+                        <Divider>
+                          <Space size={12}>
+                            <span style={{ color: '#cbd5e1', fontWeight: 600 }}>📋 最终方案总结</span>
+                            <Tooltip title="下载 Markdown 文档">
+                              <Button
+                                size="small"
+                                type="primary"
+                                ghost
+                                icon={<DownloadOutlined />}
+                                onClick={() => {
+                                  const blob = new Blob([result.summary], { type: 'text/markdown;charset=utf-8' });
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `调度方案_${new Date().toISOString().slice(0,10)}.md`;
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                  message.success('方案已下载');
+                                }}
+                              >
+                                下载方案
+                              </Button>
+                            </Tooltip>
+                          </Space>
+                        </Divider>
                         <div style={{
-                          background: 'linear-gradient(135deg, #f0f9ff 0%, #ecfdf5 100%)',
-                          padding: 20,
-                          borderRadius: 12,
+                          background: 'rgba(15,23,42,0.65)',
+                          backdropFilter: 'blur(10px)',
+                          padding: 24,
+                          borderRadius: 14,
+                          border: '1px solid rgba(59,130,246,0.25)',
                           borderLeft: '4px solid #3b82f6',
+                          maxHeight: '60vh',
+                          overflow: 'auto',
+                          boxShadow: 'inset 0 0 40px rgba(0,0,0,0.3)',
                         }}>
-                          <pre style={{
+                          <div style={{
                             whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
                             fontSize: 14,
-                            lineHeight: 1.8,
+                            lineHeight: 1.9,
                             margin: 0,
-                            color: '#1e1b4b',
+                            color: '#f1f5f9',
+                            fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
                           }}>
                             {result.summary}
-                          </pre>
+                          </div>
                         </div>
                       </>
                     )}
@@ -480,26 +612,15 @@ export default function AgentWorkflow() {
               </Card>
             </>
           ) : (
-            <Card
-              style={{
-                borderRadius: 16,
-                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
-                border: 'none',
-                height: '700px',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              <ChatUI
-                onWorkflowRequest={handleRunWorkflow}
-                sessionId={sessionId}
-                setSessionId={setSessionId}
-              />
-            </Card>
+            <ChatUI
+              onWorkflowRequest={handleRunWorkflow}
+              sessionId={sessionId}
+              setSessionId={setSessionId}
+            />
           )}
         </Col>
 
-        <Col xs={24} lg={8}>
+        <Col xs={24} lg={8} style={{ display: 'flex', flexDirection: 'column', gap: 16, height: '100%', overflow: 'hidden' }}>
           <Card
             title={
               <Space>
@@ -517,7 +638,7 @@ export default function AgentWorkflow() {
                 刷新
               </Button>
             }
-            style={{ borderRadius: 16, marginBottom: 24 }}
+            style={{ borderRadius: 16, flex: 1 }}
           >
             {sessions.length === 0 ? (
               <Empty
@@ -543,31 +664,56 @@ export default function AgentWorkflow() {
                 <Badge count={tools.length} style={{ backgroundColor: '#10b981' }} />
               </Space>
             }
-            style={{ borderRadius: 16 }}
+            style={{ borderRadius: 16, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+            styles={{ body: { flex: 1, minHeight: 0, padding: '12px 16px' } }}
           >
             {tools.length === 0 ? (
               <Empty description="暂无工具" />
             ) : (
-              <div style={{ maxHeight: 300, overflow: 'auto' }}>
-                {tools.map((tool) => (
-                  <div
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                overflowY: 'auto',
+                maxHeight: '100%',
+                paddingRight: 4,
+              }}>
+                {tools.map((tool, idx) => (
+                  <motion.div
                     key={tool.name}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.05 }}
+                    whileHover={{ scale: 1.01, x: 4 }}
                     style={{
                       padding: '12px 16px',
-                      marginBottom: 8,
                       borderRadius: 10,
-                      background: '#fafbfc',
+                      background: '#ffffff',
+                      border: '1px solid #e5e7eb',
                       borderLeft: '3px solid #10b981',
+                      cursor: 'default',
+                      transition: 'all 0.2s',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#f0fdf4';
+                      e.currentTarget.style.borderColor = '#86efac';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(16,185,129,0.12)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = '#ffffff';
+                      e.currentTarget.style.borderColor = '#e5e7eb';
+                      e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)';
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ApiOutlined style={{ color: '#10b981' }} />
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{tool.name}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <ApiOutlined style={{ color: '#059669', fontSize: 14 }} />
+                      <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{tool.name}</span>
                     </div>
-                    <div style={{ fontSize: 12, color: '#666', marginTop: 4, marginLeft: 24 }}>
+                    <div style={{ fontSize: 12, color: '#4b5563', marginLeft: 28, lineHeight: 1.6 }}>
                       {tool.description}
                     </div>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             )}

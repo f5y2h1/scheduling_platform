@@ -84,7 +84,7 @@ export default function MainLayout({ children }) {
         <div style={{
           textAlign: 'center',
           padding: '12px 20px',
-          color: '#999',
+          color: '#64748b',
           fontSize: 12,
           borderTop: '1px solid #f0f0f0',
         }}>

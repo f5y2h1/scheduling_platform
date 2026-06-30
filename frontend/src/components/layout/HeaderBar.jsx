@@ -40,7 +40,7 @@ export default function HeaderBar() {
     }}>
       <Space size={24}>
         <Badge count={5} size="small">
-          <BellOutlined style={{ fontSize: 18, cursor: 'pointer', color: '#666' }} />
+          <BellOutlined style={{ fontSize: 18, cursor: 'pointer', color: '#94a3b8' }} />
         </Badge>
         <Dropdown menu={userMenu} placement="bottomRight">
           <Space style={{ cursor: 'pointer' }}>
@@ -49,7 +49,7 @@ export default function HeaderBar() {
               icon={<UserOutlined />}
               style={{ backgroundColor: token.colorPrimary }}
             />
-            <span style={{ fontWeight: 500, color: '#333' }}>
+            <span style={{ fontWeight: 500, color: '#cbd5e1' }}>
               {userInfo?.realName || userInfo?.username || '管理员'}
             </span>
           </Space>

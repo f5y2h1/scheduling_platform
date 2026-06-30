@@ -102,7 +102,7 @@ export default function FulfillmentManagement() {
       </Card>
 
       <Modal title="新建履约单" open={modalOpen}
-        onCancel={() => setModalOpen(false)} onOk={handleSubmit} destroyOnClose>
+        onCancel={() => setModalOpen(false)} onOk={handleSubmit} destroyOnHidden>
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item name="orderNo" label="关联订单号" rules={[{ required: true }]}>
             <Input placeholder="请输入订单号" />

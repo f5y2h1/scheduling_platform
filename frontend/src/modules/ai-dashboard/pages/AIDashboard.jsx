@@ -4,6 +4,7 @@
  * 模型选择已移除，默认使用 qwen-plus
  */
 import React, { useEffect, useState } from 'react';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import {
   Row, Col, Card, Input, Button, Space, Tag, Spin,
   Collapse, Avatar, Timeline, Badge, Divider,
@@ -40,7 +41,7 @@ const agentColors = {
 export default function AIDashboard() {
   const [agents, setAgents] = useState([]);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = usePersistedState('ai_dashboard_query', '');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [pipelineResult, setPipelineResult] = useState(null);
@@ -111,10 +112,10 @@ export default function AIDashboard() {
             </div>
           </Col>
           <Col flex="auto">
-            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#1e1b4b' }}>
+            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#e2e8f0' }}>
               AI 智能看板
             </h1>
-            <p style={{ margin: 4, color: '#666', fontSize: 14 }}>
+            <p style={{ margin: 4, color: '#94a3b8', fontSize: 14 }}>
               多 Agent 协作的智能调度系统
             </p>
           </Col>
@@ -156,7 +157,7 @@ export default function AIDashboard() {
                   {agentIcons[agent.id] || <ExperimentOutlined />}
                 </div>
                 <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{agent.name}</div>
-                <div style={{ fontSize: 11, color: '#888' }}>{agent.description}</div>
+                <div style={{ fontSize: 11, color: '#94a3b8' }}>{agent.description}</div>
                 {selectedAgent === agent.id && (
                   <Tag color={agentColors[agent.id]} style={{ marginTop: 8 }}>
                     已选择
@@ -187,7 +188,7 @@ export default function AIDashboard() {
           >
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               <div>
-                <div style={{ fontWeight: 600, marginBottom: 8, color: '#1e1b4b' }}>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: '#e2e8f0' }}>
                   <FireOutlined style={{ color: '#ef4444', marginRight: 8 }} />
                   输入查询内容
                 </div>
@@ -282,7 +283,7 @@ export default function AIDashboard() {
                 { color: '#8b5cf6', children: (
                   <div>
                     <strong style={{ color: '#8b5cf6' }}>需求预测 Agent</strong>
-                    <p style={{ margin: '4px 0', fontSize: 12, color: '#666' }}>
+                    <p style={{ margin: '4px 0', fontSize: 12, color: '#94a3b8' }}>
                       分析历史数据，预测未来需求趋势
                     </p>
                   </div>
@@ -290,7 +291,7 @@ export default function AIDashboard() {
                 { color: '#10b981', children: (
                   <div>
                     <strong style={{ color: '#10b981' }}>库存优化 Agent</strong>
-                    <p style={{ margin: '4px 0', fontSize: 12, color: '#666' }}>
+                    <p style={{ margin: '4px 0', fontSize: 12, color: '#94a3b8' }}>
                       计算最优库存策略，降低库存成本
                     </p>
                   </div>
@@ -298,7 +299,7 @@ export default function AIDashboard() {
                 { color: '#3b82f6', children: (
                   <div>
                     <strong style={{ color: '#3b82f6' }}>调度决策 Agent</strong>
-                    <p style={{ margin: '4px 0', fontSize: 12, color: '#666' }}>
+                    <p style={{ margin: '4px 0', fontSize: 12, color: '#94a3b8' }}>
                       制定智能调度方案，优化资源分配
                     </p>
                   </div>
@@ -306,7 +307,7 @@ export default function AIDashboard() {
                 { color: '#f59e0b', children: (
                   <div>
                     <strong style={{ color: '#f59e0b' }}>成本优化 Agent</strong>
-                    <p style={{ margin: '4px 0', fontSize: 12, color: '#666' }}>
+                    <p style={{ margin: '4px 0', fontSize: 12, color: '#94a3b8' }}>
                       分析成本结构，提出优化建议
                     </p>
                   </div>
@@ -314,7 +315,7 @@ export default function AIDashboard() {
                 { color: '#ef4444', children: (
                   <div>
                     <strong style={{ color: '#ef4444' }}>风险控制 Agent</strong>
-                    <p style={{ margin: '4px 0', fontSize: 12, color: '#666' }}>
+                    <p style={{ margin: '4px 0', fontSize: 12, color: '#94a3b8' }}>
                       识别潜在风险，提供预警方案
                     </p>
                   </div>
@@ -322,7 +323,7 @@ export default function AIDashboard() {
                 { color: '#06b6d4', children: (
                   <div>
                     <strong style={{ color: '#06b6d4' }}>执行管控 Agent</strong>
-                    <p style={{ margin: '4px 0', fontSize: 12, color: '#666' }}>
+                    <p style={{ margin: '4px 0', fontSize: 12, color: '#94a3b8' }}>
                       监督执行落地，确保方案实施
                     </p>
                   </div>

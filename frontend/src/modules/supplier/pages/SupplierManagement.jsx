@@ -87,7 +87,7 @@ export default function SupplierManagement() {
       </Card>
 
       <Modal title={editing ? '编辑供应商' : '新增供应商'} open={modalOpen}
-        onCancel={() => setModalOpen(false)} onOk={handleSubmit} destroyOnClose>
+        onCancel={() => setModalOpen(false)} onOk={handleSubmit} destroyOnHidden>
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}>
             <Input placeholder="供应商名称" />

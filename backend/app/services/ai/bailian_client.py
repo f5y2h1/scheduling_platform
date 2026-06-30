@@ -23,17 +23,65 @@ class BailianClient:
 
     def get_models(self) -> list[dict]:
         return self.MODELS
-    
+
     def _convert_to_multimodal_format(self, messages: list[dict]) -> list[dict]:
-        """将标准消息格式转换为多模态格式（支持文本+图片）"""
-        return [
-            {
-                "role": m.get("role", "user"),
-                "content": self._build_multimodal_content(m.get("content", ""), m.get("image"))
-            }
-            for m in messages
-        ]
-    
+        """将标准消息格式转换为多模态格式（支持文本+图片+工具调用）
+        兼容 OpenAI function-calling 规范，回传 tool_calls 时保留 function 包装
+        """
+        formatted_messages = []
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            image = m.get("image")
+            tool_calls = m.get("tool_calls")
+            raw_tool_calls = m.get("_raw_tool_calls")
+
+            # 工具结果消息 — 保留 role=tool 并携带 tool_call_id
+            if role == "tool":
+                entry = {"role": "tool", "content": [{"text": content}]}
+                tc_id = m.get("tool_call_id", "")
+                tc_name = m.get("name", "")
+                if tc_id:
+                    entry["tool_call_id"] = tc_id
+                if tc_name:
+                    entry["name"] = tc_name
+                formatted_messages.append(entry)
+
+            # 包含工具调用的 assistant 消息 — 使用 function 包装
+            elif role == "assistant" and tool_calls:
+                msg = {
+                    "role": "assistant",
+                    "content": [{"text": content}] if content else [],
+                }
+                if raw_tool_calls:
+                    msg["tool_calls"] = raw_tool_calls
+                else:
+                    msg["tool_calls"] = []
+                    for tc in tool_calls:
+                        tc_name = tc.get("name") or tc.get("tool_name", "")
+                        tc_args = tc.get("arguments", {})
+                        entry = {
+                            "type": "function",
+                            "function": {
+                                "name": tc_name,
+                                "arguments": json.dumps(tc_args, ensure_ascii=False)
+                                if isinstance(tc_args, dict) else str(tc_args),
+                            },
+                        }
+                        if tc.get("id"):
+                            entry["id"] = tc["id"]
+                        msg["tool_calls"].append(entry)
+                formatted_messages.append(msg)
+
+            # 普通消息
+            else:
+                formatted_messages.append({
+                    "role": role,
+                    "content": self._build_multimodal_content(content, image),
+                })
+
+        return formatted_messages
+
     def _build_multimodal_content(self, content: str, image: str = None) -> list[dict]:
         """构建多模态消息内容（支持文本+图片）"""
         parts = []
@@ -42,7 +90,7 @@ class BailianClient:
         if content and content.strip():
             parts.append({"text": content.strip()})
         return parts if parts else [{"text": ""}]
-    
+
     def _convert_tools_for_model(self, tools: List[Dict]) -> List[Dict]:
         """将工具列表转换为模型可识别的格式"""
         formatted_tools = []
@@ -55,7 +103,7 @@ class BailianClient:
                 formatted_tool["parameters"] = tool["args_schema"]
             formatted_tools.append(formatted_tool)
         return formatted_tools
-    
+
     def _convert_to_tools_format(self, tools: List[Dict]) -> List[Dict]:
         """将工具列表转换为百炼API需要的格式"""
         formatted_tools = []
@@ -70,7 +118,7 @@ class BailianClient:
                     "properties": properties,
                     "required": required,
                 }
-            
+
             formatted_tool = {
                 "tool_name": tool.get("name", ""),
                 "tool_description": tool.get("description", ""),
@@ -78,24 +126,59 @@ class BailianClient:
             }
             formatted_tools.append(formatted_tool)
         return formatted_tools
-    
+
     def _parse_tool_calls(self, tool_calls_data) -> List[Dict]:
-        """解析模型返回的工具调用"""
+        """解析模型返回的工具调用，同时保留原始 id 和 function 包装用于回传"""
         tool_calls = []
-        
+
         if isinstance(tool_calls_data, list):
             for tc in tool_calls_data:
                 tool_call = {}
-                if isinstance(tc, dict):
-                    tool_call["name"] = tc.get("name") or tc.get("tool_name")
-                    tool_call["arguments"] = tc.get("arguments") or tc.get("params") or {}
+                arguments = {}
+                call_id = None
+
+                # 保留原始 id 用于回传
+                if hasattr(tc, "id"):
+                    call_id = getattr(tc, "id", None)
+                elif isinstance(tc, dict):
+                    call_id = tc.get("id")
+
+                # 处理 SDK 对象格式
+                if hasattr(tc, "function"):
+                    func_obj = tc.function
+                    tool_call["name"] = getattr(func_obj, "name", None)
+                    args_raw = getattr(func_obj, "arguments", None)
+                    call_id = call_id or getattr(tc, "id", None)
+                # 处理字典格式
+                elif isinstance(tc, dict):
+                    func_data = tc.get("function", tc)
+                    tool_call["name"] = func_data.get("name") or func_data.get("tool_name")
+                    args_raw = func_data.get("arguments") or func_data.get("params")
                 else:
                     tool_call["name"] = getattr(tc, "name", None) or getattr(tc, "tool_name", None)
-                    tool_call["arguments"] = getattr(tc, "arguments", None) or getattr(tc, "params", None) or {}
-                
+                    args_raw = getattr(tc, "arguments", None) or getattr(tc, "params", None)
+
+                # 解析 arguments（可能是字符串 JSON 或字典）
+                if args_raw:
+                    if isinstance(args_raw, str):
+                        try:
+                            arguments = json.loads(args_raw)
+                        except json.JSONDecodeError:
+                            logger.warning(f"工具参数解析失败: {args_raw}")
+                            arguments = {}
+                    elif isinstance(args_raw, dict):
+                        arguments = args_raw
+                    else:
+                        arguments = {}
+
+                tool_call["arguments"] = arguments
+                if call_id:
+                    tool_call["id"] = call_id
+
                 if tool_call["name"]:
                     tool_calls.append(tool_call)
-        
+                    logger.info(f"[解析工具调用] id={call_id}, name={tool_call['name']}, arguments={arguments}")
+
         return tool_calls
 
     # ===================== LLM 对话 =====================
@@ -117,7 +200,7 @@ class BailianClient:
 
         try:
             t0 = time.time()
-            
+
             call_kwargs = {
                 "api_key": settings.BAILIAN_API_KEY,
                 "model": current_model,
@@ -125,7 +208,7 @@ class BailianClient:
                 "temperature": temp,
                 "max_tokens": max_tok,
             }
-            
+
             if tools and len(tools) > 0:
                 call_kwargs["tools"] = self._convert_to_tools_format(tools)
 
@@ -134,7 +217,20 @@ class BailianClient:
 
             content = ""
             tool_calls = []
-            if response.status_code == 200:
+            raw_tool_calls = None
+            success = True
+            error_message = ""
+
+            if response.status_code != 200:
+                success = False
+                error_message = f"API调用失败: status_code={response.status_code}"
+                if hasattr(response, 'message'):
+                    error_message = response.message
+                elif hasattr(response, 'output') and response.output is not None:
+                    if hasattr(response.output, 'message'):
+                        error_message = response.output.message
+                logger.error(f"LLM调用失败: model={current_model}, status={response.status_code}, error={error_message}")
+            else:
                 output = response.output
                 choices = None
                 if output is not None:
@@ -151,7 +247,7 @@ class BailianClient:
                         content_data = getattr(msg_obj, "content", None)
                         if content_data is None and isinstance(msg_obj, dict):
                             content_data = msg_obj.get("content") or ""
-                        
+
                         if isinstance(content_data, list):
                             text_parts = []
                             for item in content_data:
@@ -162,12 +258,14 @@ class BailianClient:
                             content = "".join(text_parts)
                         else:
                             content = str(content_data)
-                        
+
+                        # 获取原始 tool_calls（保留完整格式用于回传）
                         tool_calls_data = getattr(msg_obj, "tool_calls", None)
                         if tool_calls_data is None and isinstance(msg_obj, dict):
                             tool_calls_data = msg_obj.get("tool_calls")
-                        
+
                         if tool_calls_data:
+                            raw_tool_calls = tool_calls_data
                             tool_calls = self._parse_tool_calls(tool_calls_data)
 
             total_tokens = 0
@@ -177,16 +275,18 @@ class BailianClient:
                     total_tokens = response.usage.get("total_tokens", 0)
 
             logger.info(
-                f"LLM调用: model={current_model}, tokens={total_tokens}, time={elapsed:.2f}s, tool_calls={len(tool_calls)}"
+                f"LLM调用: model={current_model}, tokens={total_tokens}, time={elapsed:.2f}s, tool_calls={len(tool_calls)}, success={success}"
             )
 
             return {
-                "success": True,
+                "success": success,
                 "content": content,
                 "model": current_model,
                 "total_tokens": total_tokens,
                 "response_time": round(elapsed, 3),
                 "tool_calls": tool_calls,
+                "raw_tool_calls": raw_tool_calls,
+                "error_message": error_message,
             }
 
         except Exception as e:
@@ -198,6 +298,20 @@ class BailianClient:
                 "total_tokens": 0,
                 "response_time": 0,
             }
+
+    def validate_api_key(self) -> dict:
+        """验证 API 密钥是否有效"""
+        msgs = [{"role": "user", "content": "ping"}]
+        try:
+            resp = self.chat(msgs, model=settings.LLM_DEFAULT_MODEL, max_tokens=10)
+            if resp.get("success"):
+                return {"valid": True, "message": f"API 密钥有效，模型: {resp.get('model', '?')}"}
+            err = resp.get("error_message", "")
+            if "InvalidApiKey" in err or "Invalid API-key" in err or "401" in err:
+                return {"valid": False, "message": "API 密钥无效，请检查 backend/.env 中 BAILIAN_API_KEY 的值"}
+            return {"valid": False, "message": f"API 调用异常: {err[:200]}"}
+        except Exception as e:
+            return {"valid": False, "message": f"API 连通性异常: {str(e)[:200]}"}
 
     def simple_chat(
         self, system_prompt: str, user_message: str, model: str | None = None,
@@ -309,7 +423,7 @@ class BailianClient:
                                 content_data = getattr(msg_obj, "content", None)
                                 if content_data is None and isinstance(msg_obj, dict):
                                     content_data = msg_obj.get("content")
-                                
+
                                 if content_data is None:
                                     delta = getattr(msg_obj, "delta", None)
                                     if delta is None and isinstance(msg_obj, dict):
@@ -446,48 +560,48 @@ class BailianClient:
     ) -> AsyncGenerator[str, None]:
         """异步流式对话"""
         import asyncio
-        
+
         results = await asyncio.to_thread(
             self._streaming_chat_sync,
             messages, model, temperature, max_tokens
         )
-        
+
         for text in results:
             yield text
 
 
 class ContextManager:
     """聊天上下文管理器"""
-    
+
     MAX_HISTORY_ROUNDS = 10
     MAX_TOTAL_TOKENS = 4000
     COMPRESS_THRESHOLD = 5
-    
+
     def __init__(self):
         self.conversations: Dict[str, List[Dict[str, Any]]] = {}
-    
+
     def get_history(self, session_id: str) -> List[Dict[str, Any]]:
         return self.conversations.get(session_id, [])
-    
+
     def add_message(self, session_id: str, role: str, content: str, image: str = None):
         if session_id not in self.conversations:
             self.conversations[session_id] = []
-        
+
         self.conversations[session_id].append({
             "role": role,
             "content": content,
             "image": image,
             "timestamp": time.time(),
         })
-        
+
         self._compress_history(session_id)
-    
+
     def _compress_history(self, session_id: str):
         history = self.conversations.get(session_id, [])
-        
+
         if len(history) <= self.MAX_HISTORY_ROUNDS:
             return
-        
+
         compressed = []
         if len(history) > self.COMPRESS_THRESHOLD:
             old_messages = history[:-self.COMPRESS_THRESHOLD]
@@ -497,15 +611,15 @@ class ContextManager:
                 "content": f"【对话摘要】{summary}",
                 "is_summary": True,
             })
-        
+
         compressed.extend(history[-self.COMPRESS_THRESHOLD:])
         self.conversations[session_id] = compressed
-    
+
     def _generate_summary(self, messages: List[Dict[str, Any]]) -> str:
         try:
             user_content = "\n".join([m["content"] for m in messages if m["role"] == "user"])
             assistant_content = "\n".join([m["content"] for m in messages if m["role"] == "assistant"])
-            
+
             summary_prompt = f"""请用简短的中文概括以下对话内容：
 
 用户说：
@@ -515,7 +629,7 @@ class ContextManager:
 {assistant_content[:500]}
 
 摘要："""
-            
+
             summary = bailian_client.simple_chat(
                 system_prompt="你是一个对话摘要助手，请用简洁的语言概括对话要点。",
                 user_message=summary_prompt,
@@ -525,37 +639,46 @@ class ContextManager:
         except Exception as e:
             logger.error(f"生成摘要失败: {e}")
             return "历史对话较多，已压缩"
-    
+
     def build_messages(self, session_id: str, current_query: str, image: str = None) -> List[Dict[str, Any]]:
         history = self.get_history(session_id)
         messages = []
-        
+
         system_prompt = {
             "role": "system",
-            "content": "你是一个供应链调度智能助手，具备图片理解能力。你的任务是：\n"
-                       "1. 当用户上传图片时，先分析图片内容是否与供应链管理、需求预测、库存优化、调度决策、物流运输、采购管理等主题相关。\n"
-                       "2. 如果图片内容与供应链相关（如流程图、数据图表、物流单据、库存照片、运输场景等），请结合图片内容进行专业分析和回答。\n"
-                       "3. 如果图片内容与供应链无关（如风景、人物、日常物品等），请正常回答用户的问题，不要强行关联供应链主题。\n"
-                       "4. 当用户提出调度需求时，识别并提示用户使用工作流功能。\n"
-                       "5. 请根据图片内容和用户问题，提供准确、有用的回答。"
+            "content": "你是一个供应链调度智能助手，具备图片理解能力和工具调用能力。你的任务是：\n"
+                       "1. 当用户询问库存、订单、供应商等业务数据时，必须调用相应的工具查询真实数据。\n"
+                       "2. 可用工具包括：\n"
+                       "   - query_inventory: 查询库存信息，支持商品名称和仓库名称模糊匹配\n"
+                       "   - query_low_stock: 查询低库存商品列表\n"
+                       "   - query_orders: 查询订单信息，支持按状态筛选\n"
+                       "   - query_suppliers: 查询供应商信息，支持关键字模糊匹配\n"
+                       "   - stock_in_operation: 执行入库操作，需要库存ID和数量\n"
+                       "   - stock_out_operation: 执行出库操作，需要库存ID和数量\n"
+                       "3. 当用户上传图片时，先分析图片内容是否与供应链管理、需求预测、库存优化、调度决策、物流运输、采购管理等主题相关。\n"
+                       "4. 如果图片内容与供应链相关（如流程图、数据图表、物流单据、库存照片、运输场景等），请结合图片内容进行专业分析和回答。\n"
+                       "5. 如果图片内容与供应链无关（如风景、人物、日常物品等），请正常回答用户的问题，不要强行关联供应链主题。\n"
+                       "6. 当用户提出调度需求时，识别并提示用户使用工作流功能。\n"
+                       "7. 请根据图片内容和用户问题，提供准确、有用的回答。\n"
+                       "8. 当调用工具后，根据工具返回的结果进行总结回答，不要编造数据。"
         }
         messages.append(system_prompt)
-        
+
         for msg in history:
             messages.append({
                 "role": msg["role"],
                 "content": msg["content"],
                 "image": msg.get("image"),
             })
-        
+
         messages.append({
             "role": "user",
             "content": current_query,
             "image": image,
         })
-        
+
         return messages
-    
+
     def clear_history(self, session_id: str):
         if session_id in self.conversations:
             del self.conversations[session_id]

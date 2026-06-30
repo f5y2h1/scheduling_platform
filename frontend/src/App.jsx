@@ -21,7 +21,7 @@ const AgentWorkflow = React.lazy(() => import('./modules/ai-dashboard/pages/Agen
 const PageLoading = () => (
   <div style={{
     display: 'flex', justifyContent: 'center', alignItems: 'center',
-    height: '100%', minHeight: 400, fontSize: 16, color: '#999'
+    height: '100%', minHeight: 400, fontSize: 16, color: '#64748b'
   }}>
     页面加载中...
   </div>
@@ -55,7 +55,7 @@ class ErrorBoundary extends React.Component {
           }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
             <h2 style={{ margin: 0, color: '#ef4444', fontSize: 20 }}>页面加载出错</h2>
-            <p style={{ color: '#666', marginTop: 12, fontSize: 14 }}>
+            <p style={{ color: '#94a3b8', marginTop: 12, fontSize: 14 }}>
               {this.state.error?.message || '未知错误'}
             </p>
             <button

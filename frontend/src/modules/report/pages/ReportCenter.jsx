@@ -73,7 +73,7 @@ export default function ReportCenter() {
 
   return (
     <div>
-      <h2 style={{ marginBottom: 24, color: '#1e1b4b', fontSize: 22, fontWeight: 700 }}>
+      <h2 style={{ marginBottom: 24, color: '#e2e8f0', fontSize: 22, fontWeight: 700 }}>
         📊 数据报表中心
       </h2>
 

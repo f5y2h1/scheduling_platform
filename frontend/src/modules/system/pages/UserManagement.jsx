@@ -3,6 +3,7 @@ import { Table, Button, Space, Tag, Popconfirm, message, Input, Select } from 'a
 import { PlusOutlined } from '@ant-design/icons';
 import { userAPI } from '@/services/api';
 import { useTable, useModal } from '@/hooks';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { PageHeader, FormModal } from '@/components/common';
 
 const roleMap = {
@@ -13,7 +14,7 @@ const roleMap = {
 };
 
 export default function UserManagement() {
-  const [keyword, setKeyword] = useState('');
+  const [keyword, setKeyword] = usePersistedState('user_keyword', '');
   const { data, loading, pagination, handleChange, refresh } = useTable(userAPI.list, { page: 1, size: 20 });
   const { visible, editingId, form, show, hide, confirm } = useModal({ role: 'USER', status: 1 });
 

@@ -81,7 +81,7 @@ axiosInstance.interceptors.response.use(
     }
     const msg = error.response?.data?.message || error.message || '网络错误';
     if (isNetworkError(error)) {
-      message.error('后端服务未启动，请确保后端服务正在运行 (http://localhost:8080)');
+      message.error('后端服务未启动，请确保后端服务正在运行 (http://localhost:8000)');
     } else if (error.response && error.response.status !== 404) {
       message.error(msg);
     }
@@ -122,7 +122,7 @@ const smartRequest = {
       await axiosInstance.get('/health');
       return true;
     } catch {
-      message.error('后端服务未启动，请确保后端服务正在运行 (http://localhost:8080)');
+      message.error('后端服务未启动，请确保后端服务正在运行 (http://localhost:8000)');
       return false;
     }
   },
